@@ -1,5 +1,5 @@
 """
-server.py — Girus Dashboard Server
+server.py — Girus Dashboard Server v3
 """
 
 import os
@@ -37,7 +37,6 @@ DADOS_BASE = {
 }
 
 cache = {"dados": None, "atualizado_em": None, "erro": None}
-
 BASE_URL = "https://app.omie.com.br/api/v1"
 HEADERS  = {"Content-Type": "application/json"}
 
@@ -57,7 +56,7 @@ def requer_auth(f):
 
 
 def classificar(nome):
-    n = nome.upper()
+    n = (nome or "").upper()
     if "GIRUS" in n or "INDUSMOV" in n:
         return "fabrica"
     if "ARTFIX" in n:
@@ -65,13 +64,70 @@ def classificar(nome):
     return "atacado"
 
 
-def montar_dados(fat, fonte="base"):
+def omie_post(endpoint, call, params):
+    payload = {
+        "call": call,
+        "app_key": APP_KEY,
+        "app_secret": APP_SECRET,
+        "param": [params]
+    }
+    r = requests.post(
+        f"{BASE_URL}/{endpoint}/",
+        headers=HEADERS, json=payload, timeout=20
+    )
+    r.raise_for_status()
+    return r.json()
+
+
+def buscar_faturamento_omie():
+    """Busca NFs de saída pelo módulo de Faturamento."""
+    mes = datetime.now().strftime("%m/%Y")
+    totais = {"fabrica": 0.0, "quimica": 0.0, "atacado": 0.0}
+    total_valor = 0.0
+    pagina = 1
+
+    while True:
+        resp = omie_post("produtos/nfconsultar", "ListarNF", {
+            "pagina": pagina,
+            "registros_por_pagina": 50,
+            "dDtEmi_De":  f"01/{mes}",
+            "dDtEmi_Ate": f"31/{mes}",
+            "tpNF": "1",  # 1 = Saída
+        })
+
+        registros = resp.get("nfCadastro", [])
+        if not registros:
+            break
+
+        for nf in registros:
+            # Tenta diferentes campos de nome/cliente
+            nome = (
+                nf.get("dest", {}).get("cRazaoSocial", "") or
+                nf.get("ide", {}).get("cNome", "") or
+                nf.get("emit", {}).get("cRazaoSocial", "") or ""
+            )
+            valor = float(nf.get("total", {}).get("vNF", 0))
+            total_valor += valor
+            seg = classificar(nome)
+            totais[seg] += valor
+
+        total_pag = resp.get("total_de_paginas", 1)
+        print(f"  NF pág {pagina}/{total_pag}: {len(registros)} registros, total R$ {total_valor:,.0f}")
+        if pagina >= total_pag:
+            break
+        pagina += 1
+
+    return totais, total_valor
+
+
+def montar_dados(fat, fonte="base", total_omie=0):
     hoje      = datetime.now()
     dias_mes  = 30
     dia_atual = hoje.day
     prog_mes  = round((dia_atual / dias_mes) * 100, 1)
     fat_total = fat["fabrica"] + fat["quimica"] + fat["atacado"]
     mes       = hoje.strftime("%m/%Y")
+
     return {
         "atualizado_em": datetime.now().isoformat(),
         "mes":           mes,
@@ -79,6 +135,7 @@ def montar_dados(fat, fonte="base"):
         "dias_mes":      dias_mes,
         "prog_mes":      prog_mes,
         "fonte":         fonte,
+        "total_omie_raw": total_omie,
         "faturamento": {
             "fabrica": fat["fabrica"],
             "quimica": fat["quimica"],
@@ -97,46 +154,27 @@ def montar_dados(fat, fonte="base"):
 
 def atualizar_cache():
     global cache
+    print(f"[{datetime.now():%H:%M:%S}] Buscando dados do Omie...")
+
     fat = dict(DADOS_BASE)
     fonte = "base"
+    total_omie = 0
+
     if APP_KEY and APP_SECRET:
         try:
-            mes = datetime.now().strftime("%m/%Y")
-            totais = {"fabrica": 0.0, "quimica": 0.0, "atacado": 0.0}
-            pagina = 1
-            while True:
-                payload = {
-                    "call": "ListarNF",
-                    "app_key": APP_KEY,
-                    "app_secret": APP_SECRET,
-                    "param": [{
-                        "pagina": pagina,
-                        "registros_por_pagina": 100,
-                        "dDtEmi_De":  f"01/{mes}",
-                        "dDtEmi_Ate": f"31/{mes}",
-                    }]
-                }
-                r = requests.post(f"{BASE_URL}/produtos/nfconsultar/", headers=HEADERS, json=payload, timeout=15)
-                r.raise_for_status()
-                resp = r.json()
-                nfs = resp.get("nfCadastro", [])
-                if not nfs:
-                    break
-                for nf in nfs:
-                    nome  = nf.get("ide", {}).get("cNome", "") or ""
-                    valor = float(nf.get("total", {}).get("vNF", 0))
-                    totais[classificar(nome)] += valor
-                if pagina >= resp.get("total_de_paginas", 1):
-                    break
-                pagina += 1
-            if sum(totais.values()) > 0:
+            totais, total_omie = buscar_faturamento_omie()
+            if total_omie > 0:
                 fat = totais
                 fonte = "omie"
+                print(f"  ✓ Omie OK — Total: R$ {total_omie:,.2f}")
+            else:
+                print("  ! Omie retornou zero — usando dados base")
         except Exception as e:
-            print(f"Omie indisponível: {e}")
-    cache["dados"] = montar_dados(fat, fonte)
+            print(f"  ✗ Erro Omie: {e}")
+
+    cache["dados"]         = montar_dados(fat, fonte, total_omie)
     cache["atualizado_em"] = datetime.now().isoformat()
-    cache["erro"] = None
+    cache["erro"]          = None
 
 
 def loop_atualizacao():
@@ -144,7 +182,7 @@ def loop_atualizacao():
         try:
             atualizar_cache()
         except Exception as e:
-            print(f"Erro: {e}")
+            print(f"Erro loop: {e}")
             if cache["dados"] is None:
                 cache["dados"] = montar_dados(dict(DADOS_BASE), "base")
         time.sleep(3600)
@@ -167,7 +205,12 @@ def api_dados():
 @app.route("/api/status")
 @requer_auth
 def api_status():
-    return jsonify({"online": True, "atualizado_em": cache["atualizado_em"], "erro": cache["erro"]})
+    return jsonify({
+        "online":        True,
+        "atualizado_em": cache["atualizado_em"],
+        "erro":          cache["erro"],
+        "fonte":         cache["dados"]["fonte"] if cache["dados"] else "base",
+    })
 
 
 if __name__ == "__main__":
