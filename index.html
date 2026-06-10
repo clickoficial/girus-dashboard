@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dashboard Custos — Girus</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+  :root {
+    --bg:#0d0f14;--surface:#141720;--surface2:#191d2a;--border:#1e2330;
+    --muted:#3a4060;--text-dim:#6b7494;--text:#c8cfe8;--text-hi:#eef0f8;
+    --fabrica:#3b82f6;--quimica:#a855f7;--atacado:#10b981;
+    --alerta:#f59e0b;--critico:#ef4444;--positivo:#22c55e;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:14px;min-height:100vh;padding:22px 28px 16px}
+
+  /* HEADER */
+  .header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+  .header-left{display:flex;align-items:center;gap:14px}
+  .logo{width:38px;height:38px;background:linear-gradient(135deg,var(--fabrica),var(--quimica));border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:16px;color:#fff}
+  .h-title{font-size:18px;font-weight:600;color:var(--text-hi);letter-spacing:-0.3px}
+  .h-sub{font-size:12px;color:var(--text-dim);margin-top:2px}
+  .header-right{display:flex;align-items:center;gap:12px}
+  .badge{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--text-dim);font-family:'JetBrains Mono',monospace}
+  .badge .hl{color:var(--alerta);font-weight:600}
+  .badge .hl-b{color:var(--fabrica);font-weight:600}
+  .dot{display:inline-block;width:7px;height:7px;background:var(--positivo);border-radius:50%;margin-right:5px;animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+  .upd{font-size:11px;color:var(--text-dim);text-align:right;line-height:1.6}
+
+  /* BANNER */
+  .banner{background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.2);border-radius:8px;padding:9px 16px;margin-bottom:18px;font-size:12px;color:#93c5fd;display:flex;align-items:center;gap:10px}
+  .banner strong{color:var(--text-hi)}
+
+  /* LOADING */
+  .loading{display:flex;align-items:center;justify-content:center;min-height:60vh;flex-direction:column;gap:16px}
+  .spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--fabrica);border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* COLS 3 */
+  .cols-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;position:relative;overflow:hidden}
+  .card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
+  .card.fab::before{background:var(--fabrica)}
+  .card.qui::before{background:var(--quimica)}
+  .card.ata::before{background:var(--atacado)}
+  .c-label{font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:2px}
+  .card.fab .c-label{color:var(--fabrica)}
+  .card.qui .c-label{color:var(--quimica)}
+  .card.ata .c-label{color:var(--atacado)}
+  .c-name{font-size:14px;font-weight:600;color:var(--text-hi);margin-bottom:14px}
+  .fat-lbl{font-size:10px;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.8px}
+  .fat-val{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:600;color:var(--text-hi);line-height:1}
+  .fat-val .u{font-size:13px;color:var(--text-dim)}
+  .fat-meta{font-size:11px;color:var(--text-dim);margin-top:3px}
+  .fat-meta .p{font-weight:600}
+  .p-ok{color:var(--positivo)}.p-warn{color:var(--alerta)}.p-bad{color:var(--critico)}
+  .prog-wrap{margin:10px 0 12px}
+  .prog-lbs{display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-bottom:5px}
+  .prog-bg{height:6px;background:var(--border);border-radius:99px;overflow:hidden;position:relative}
+  .prog-fill{height:100%;border-radius:99px;transition:width 1s ease}
+  .pf-fab{background:var(--fabrica)}.pf-qui{background:var(--quimica)}.pf-ata{background:var(--atacado)}
+  .prog-ref{position:absolute;top:0;bottom:0;width:2px;background:var(--alerta);opacity:.7}
+  .c-rows{border-top:1px solid var(--border);padding-top:12px}
+  .c-row{display:flex;justify-content:space-between;align-items:baseline;padding:3px 0;font-size:11px}
+  .c-row .l{color:var(--text-dim)}
+  .c-row .v{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text)}
+
+  /* BOTTOM */
+  .bottom{display:grid;grid-template-columns:1.6fr 1fr;gap:14px}
+  .table-card{padding:18px 20px}
+  .sec-title{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:14px}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);padding:0 0 8px;border-bottom:1px solid var(--border)}
+  th:not(:first-child),td:not(:first-child){text-align:right}
+  td{padding:7px 0;font-size:12px;color:var(--text);border-bottom:1px solid var(--border)}
+  td.m{font-family:'JetBrains Mono',monospace;font-size:11px}
+  tr:last-child td{border-bottom:none;font-weight:600;color:var(--text-hi)}
+  .tag{display:inline-block;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600}
+  .tag.ok{background:rgba(34,197,94,.12);color:var(--positivo)}
+  .tag.bad{background:rgba(239,68,68,.12);color:var(--critico)}
+  .tag.watch{background:rgba(245,158,11,.12);color:var(--alerta)}
+  .nota{background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.18);border-radius:8px;padding:9px 12px;font-size:11px;color:#fcd34d;line-height:1.55;margin-top:14px}
+
+  /* TOTAL CARD */
+  .total-card{padding:18px 20px;display:flex;flex-direction:column;gap:0}
+  .kpi-lbl{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:4px}
+  .kpi-val{font-family:'JetBrains Mono',monospace;font-size:28px;font-weight:700;color:var(--text-hi);line-height:1}
+  .kpi-val .u{font-size:14px;color:var(--text-dim)}
+  .kpi-sub{font-size:11px;color:var(--text-dim);margin-top:3px}
+  .div{height:1px;background:var(--border);margin:14px 0}
+  .mini{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;font-size:12px}
+  .mini .l{color:var(--text-dim)}
+  .mini .v{font-family:'JetBrains Mono',monospace;font-size:11px}
+  .v.g{color:var(--positivo)}.v.r{color:var(--critico)}.v.a{color:var(--alerta)}
+  .res-bloco{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-top:6px}
+  .res-lbl{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);margin-bottom:6px}
+  .res-val{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700}
+  .res-val.pos{color:var(--positivo)}.res-val.neg{color:var(--critico)}
+  .res-sub{font-size:11px;color:var(--text-dim);margin-top:3px}
+  .mes-prog{margin-top:14px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
+  .mes-hdr{display:flex;justify-content:space-between;font-size:11px;color:var(--text-dim);margin-bottom:8px}
+  .mes-hdr span{font-family:'JetBrains Mono',monospace;color:var(--alerta);font-weight:600}
+  .footer{margin-top:14px;padding-top:12px;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading">
+  <div class="spinner"></div>
+  <div style="color:var(--text-dim);font-size:13px">Conectando ao Omie...</div>
+</div>
+
+<div id="app" style="display:none">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">G</div>
+      <div>
+        <div class="h-title">Dashboard de Custos</div>
+        <div class="h-sub">Girus Móveis · IndusLog · IndusMove</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="badge">Previsão: <span class="hl">mensal fixa</span></div>
+      <div class="badge">Faturamento: <span class="hl-b" id="h-mes">Junho/2026 ao vivo</span></div>
+      <div class="upd">
+        <div><span class="dot"></span>Conectado ao Omie</div>
+        <div id="h-upd">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BANNER -->
+  <div class="banner">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <span><strong>Período ativo: <span id="b-mes">—</span>.</strong>
+    Custos = previsão mensal fixa. Faturamento = acumulado real do Omie.
+    Referência atual: <strong id="b-dias">—</strong>.</span>
+  </div>
+
+  <!-- 3 CARDS -->
+  <div class="cols-3">
+    <div class="card fab">
+      <div class="c-label">Fábrica</div>
+      <div class="c-name">Girus Móveis</div>
+      <div class="fat-lbl">Faturamento Real</div>
+      <div class="fat-val"><span class="u">R$ </span><span id="v-fab">—</span></div>
+      <div class="fat-meta">Meta: R$ 3.703.866 &nbsp;·&nbsp; <span class="p" id="p-fab">—</span></div>
+      <div class="prog-wrap">
+        <div class="prog-lbs"><span>0%</span><span id="pl-fab">—</span><span>100%</span></div>
+        <div class="prog-bg"><div class="prog-fill pf-fab" id="bar-fab" style="width:0%"></div><div class="prog-ref" id="ref-fab"></div></div>
+      </div>
+      <div class="c-rows">
+        <div class="c-row"><span class="l">Margem prevista</span><span class="v">50%</span></div>
+        <div class="c-row"><span class="l">Lucro previsto</span><span class="v">R$ 1.851.933</span></div>
+        <div class="c-row"><span class="l">Custo colaboradores</span><span class="v">R$ 508.234</span></div>
+      </div>
+    </div>
+
+    <div class="card qui">
+      <div class="c-label">Química</div>
+      <div class="c-name">Artfix</div>
+      <div class="fat-lbl">Faturamento Real</div>
+      <div class="fat-val"><span class="u">R$ </span><span id="v-qui">—</span></div>
+      <div class="fat-meta">Meta: R$ 265.949 &nbsp;·&nbsp; <span class="p" id="p-qui">—</span></div>
+      <div class="prog-wrap">
+        <div class="prog-lbs"><span>0%</span><span id="pl-qui">—</span><span>100%</span></div>
+        <div class="prog-bg"><div class="prog-fill pf-qui" id="bar-qui" style="width:0%"></div><div class="prog-ref" id="ref-qui"></div></div>
+      </div>
+      <div class="c-rows">
+        <div class="c-row"><span class="l">Margem prevista</span><span class="v">30%</span></div>
+        <div class="c-row"><span class="l">Lucro previsto</span><span class="v">R$ 47.871</span></div>
+        <div class="c-row"><span class="l">% do faturamento total</span><span class="v">4,4%</span></div>
+      </div>
+    </div>
+
+    <div class="card ata">
+      <div class="c-label">Atacado</div>
+      <div class="c-name">Demais Fornecedores</div>
+      <div class="fat-lbl">Faturamento Real</div>
+      <div class="fat-val"><span class="u">R$ </span><span id="v-ata">—</span></div>
+      <div class="fat-meta">Meta: R$ 2.109.381 &nbsp;·&nbsp; <span class="p" id="p-ata">—</span></div>
+      <div class="prog-wrap">
+        <div class="prog-lbs"><span>0%</span><span id="pl-ata">—</span><span>100%</span></div>
+        <div class="prog-bg"><div class="prog-fill pf-ata" id="bar-ata" style="width:0%"></div><div class="prog-ref" id="ref-ata"></div></div>
+      </div>
+      <div class="c-rows">
+        <div class="c-row"><span class="l">Margem prevista</span><span class="v">30%</span></div>
+        <div class="c-row"><span class="l">Lucro previsto</span><span class="v">R$ 632.814</span></div>
+        <div class="c-row"><span class="l">Custo IndusLog</span><span class="v">R$ 622.873</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTTOM -->
+  <div class="bottom">
+    <div class="card table-card">
+      <div class="sec-title">Previsão Mensal (fixa) × Real acumulado</div>
+      <table>
+        <thead>
+          <tr><th>Item</th><th>Previsão Mês</th><th>Real até hoje</th><th>Projeção 30d</th><th>Status</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Custo Colaboradores</td>
+            <td class="m">R$ 1.572.000</td>
+            <td class="m" id="t-colab-real">—</td>
+            <td class="m" id="t-colab-proj">R$ 1.572.000</td>
+            <td><span class="tag watch" id="tag-colab">Previsto</span></td>
+          </tr>
+          <tr>
+            <td>Despesas Fixas</td>
+            <td class="m">R$ 1.610.000</td>
+            <td class="m" id="t-fix-real">—</td>
+            <td class="m" id="t-fix-proj">—</td>
+            <td><span class="tag watch" id="tag-fix">Aguardando</span></td>
+          </tr>
+          <tr>
+            <td>Imposto Variável</td>
+            <td class="m">R$ 455.940</td>
+            <td class="m" id="t-imp-real">—</td>
+            <td class="m" id="t-imp-proj">—</td>
+            <td><span class="tag watch" id="tag-imp">Aguardando</span></td>
+          </tr>
+          <tr>
+            <td>Faturamento Total</td>
+            <td class="m">R$ 6.079.197</td>
+            <td class="m" id="t-fat-real" style="color:var(--fabrica)">—</td>
+            <td class="m" id="t-fat-proj">—</td>
+            <td><span class="tag watch" id="tag-fat">—</span></td>
+          </tr>
+          <tr>
+            <td>Total Custos</td>
+            <td class="m">R$ 3.637.940</td>
+            <td class="m" id="t-custo-real">—</td>
+            <td class="m" id="t-custo-proj">—</td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="nota">
+        📌 A linha amarela nas barras marca o ponto esperado para hoje no mês.
+        Faturamento acima da linha = à frente da meta. Despesas e impostos são preenchidos automaticamente via Omie.
+      </div>
+    </div>
+
+    <div class="card total-card">
+      <div>
+        <div class="kpi-lbl">Faturamento Acumulado</div>
+        <div class="kpi-val"><span class="u">R$ </span><span id="kpi-fat">—</span></div>
+        <div class="kpi-sub" id="kpi-sub">Fonte: Omie</div>
+      </div>
+      <div class="div"></div>
+      <div class="mini"><span class="l">Colaboradores (prev.)</span><span class="v a">R$ 1.572.000</span></div>
+      <div class="mini"><span class="l">Despesas fixas (prev.)</span><span class="v a">R$ 1.610.000</span></div>
+      <div class="mini"><span class="l">Imposto variável (prev.)</span><span class="v a">R$ 455.940</span></div>
+      <div class="mini"><span class="l"><strong>Total custos previsto</strong></span><span class="v a">R$ 3.637.940</span></div>
+      <div class="res-bloco">
+        <div class="res-lbl">Resultado Previsto no Mês</div>
+        <div class="res-val pos" id="res-val">+ R$ 2.441.257</div>
+        <div class="res-sub" id="res-sub">Fat. previsto − Custos previstos</div>
+      </div>
+      <div class="mes-prog">
+        <div class="mes-hdr"><span>Progresso do mês</span><span id="mes-pct">—</span></div>
+        <div class="prog-bg"><div class="prog-fill pf-fab" id="bar-mes" style="width:0%"></div></div>
+        <div style="font-size:10px;color:var(--text-dim);margin-top:6px">
+          Dia <strong id="dia-n" style="color:var(--text)">—</strong> de <span id="dias-t">30</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    <div>Girus Móveis · Custos: previsão mensal fixa · Faturamento: Omie ao vivo</div>
+    <div>Fábrica (GIRUS) · Química (ARTFIX) · Atacado (Fornecedores)</div>
+  </div>
+</div>
+
+<script>
+const METAS = { fabrica: 3703866.22, quimica: 265949.40, atacado: 2109381.40 };
+const PREV  = { colaboradores: 1572000, fixas: 1610000, impostos: 455939.78, faturamento: 6079197.02 };
+
+function brl(v, compact) {
+  if (v === null || v === undefined) return "—";
+  if (compact && v >= 1e6) return "R$ " + (v/1e6).toFixed(2).replace(".",",") + "M";
+  return "R$ " + v.toLocaleString("pt-BR", {minimumFractionDigits:0, maximumFractionDigits:0});
+}
+function pct(v, m) { return ((v/m)*100).toFixed(0) + "%"; }
+function proj(real, prog) { return prog > 0 ? real / prog : 0; }
+
+function renderSegmento(key, real, meta, progMes) {
+  const ids = { fabrica:["v-fab","p-fab","pl-fab","bar-fab","ref-fab"],
+                quimica:["v-qui","p-qui","pl-qui","bar-qui","ref-qui"],
+                atacado:["v-ata","p-ata","pl-ata","bar-ata","ref-ata"] };
+  const [vId, pId, plId, barId, refId] = ids[key];
+  const prop = Math.min((real / meta) * 100, 150);
+  const esp  = progMes * 100;
+
+  document.getElementById(vId).textContent  = real.toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
+  document.getElementById(barId).style.width = Math.min(prop, 100) + "%";
+  document.getElementById(plId).textContent  = prop.toFixed(0) + "% da meta";
+  document.getElementById(refId).style.left  = Math.min(esp, 99) + "%";
+
+  const el = document.getElementById(pId);
+  el.textContent = pct(real, meta) + " da meta";
+  el.className   = "p " + (prop >= esp ? "p-ok" : prop > 60 ? "p-warn" : "p-bad");
+}
+
+function render(d) {
+  const fat  = d.faturamento;
+  const desp = d.despesas_real;
+  const prog = d.prog_mes / 100;
+
+  // Header
+  document.getElementById("h-mes").textContent  = d.mes + " ao vivo";
+  document.getElementById("h-upd").textContent  = new Date(d.atualizado_em).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  document.getElementById("b-mes").textContent  = d.mes;
+  document.getElementById("b-dias").textContent = `Dia ${d.dia_atual} de ${d.dias_mes} (${d.prog_mes}% do mês)`;
+
+  // Segmentos
+  renderSegmento("fabrica", fat.fabrica, METAS.fabrica, prog);
+  renderSegmento("quimica", fat.quimica, METAS.quimica, prog);
+  renderSegmento("atacado", fat.atacado, METAS.atacado, prog);
+
+  // Progresso do mês
+  document.getElementById("dia-n").textContent   = d.dia_atual;
+  document.getElementById("dias-t").textContent  = d.dias_mes;
+  document.getElementById("mes-pct").textContent = d.prog_mes + "% do mês";
+  document.getElementById("bar-mes").style.width = d.prog_mes + "%";
+
+  // KPI total
+  document.getElementById("kpi-fat").textContent = fat.total >= 1e6
+    ? (fat.total/1e6).toFixed(2).replace(".",",") + "M"
+    : fat.total.toLocaleString("pt-BR",{minimumFractionDigits:0,maximumFractionDigits:0});
+  document.getElementById("kpi-sub").textContent = "Fonte: Omie · " + d.mes;
+
+  // Resultado previsto
+  const resultado = PREV.faturamento - (PREV.colaboradores + PREV.fixas + PREV.impostos);
+  const resEl = document.getElementById("res-val");
+  resEl.textContent = (resultado >= 0 ? "+ " : "− ") + brl(Math.abs(resultado));
+  resEl.className   = "res-val " + (resultado >= 0 ? "pos" : "neg");
+
+  // Tabela
+  document.getElementById("t-fat-real").textContent  = brl(fat.total);
+  document.getElementById("t-fat-proj").textContent  = brl(proj(fat.total, prog));
+  document.getElementById("t-colab-real").textContent = brl(PREV.colaboradores);
+
+  const pctFat = (fat.total / PREV.faturamento) * 100;
+  const tagFat = document.getElementById("tag-fat");
+  tagFat.textContent = pctFat.toFixed(0) + "% " + (pctFat >= prog*100 ? "✓" : "⚠");
+  tagFat.className   = "tag " + (pctFat >= prog*100 ? "ok" : "watch");
+
+  if (desp.fixas !== null) {
+    document.getElementById("t-fix-real").textContent  = brl(desp.fixas);
+    document.getElementById("t-fix-proj").textContent  = brl(proj(desp.fixas, prog));
+    const tf = document.getElementById("tag-fix");
+    tf.textContent = desp.fixas > PREV.fixas ? "Acima !" : "OK ✓";
+    tf.className   = "tag " + (desp.fixas > PREV.fixas ? "bad" : "ok");
+  }
+  if (desp.impostos !== null) {
+    document.getElementById("t-imp-real").textContent = brl(desp.impostos);
+    document.getElementById("t-imp-proj").textContent = brl(proj(desp.impostos, prog));
+    const ti = document.getElementById("tag-imp");
+    ti.textContent = desp.impostos > PREV.impostos ? "Acima !" : "OK ✓";
+    ti.className   = "tag " + (desp.impostos > PREV.impostos ? "bad" : "ok");
+  }
+
+  const custoReal = (desp.colaboradores || PREV.colaboradores) + (desp.fixas || 0) + (desp.impostos || 0);
+  document.getElementById("t-custo-real").textContent = brl(custoReal);
+  document.getElementById("t-custo-proj").textContent = brl(proj(custoReal, prog));
+
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("app").style.display     = "block";
+}
+
+async function buscarDados() {
+  try {
+    const r = await fetch("/api/dados");
+    const j = await r.json();
+    if (j.status === "ok") {
+      render(j.dados);
+    } else if (j.status === "carregando") {
+      setTimeout(buscarDados, 3000);
+    }
+  } catch(e) {
+    document.querySelector(".loading div:last-child").textContent = "Erro ao conectar. Tentando novamente...";
+    setTimeout(buscarDados, 5000);
+  }
+}
+
+buscarDados();
+// Recarrega a cada 1 hora
+setInterval(() => buscarDados(), 3600000);
+</script>
+</body>
+</html>
