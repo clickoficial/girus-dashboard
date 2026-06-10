@@ -1,5 +1,6 @@
 """
-server.py — Girus Dashboard Server v3
+server.py — Girus Dashboard Server (Click Forte)
+Classifica por marca do produto no Omie
 """
 
 import os
@@ -36,6 +37,11 @@ DADOS_BASE = {
     "atacado": 2109381.40,
 }
 
+# Classificação por marca do produto no Omie
+MARCAS_FABRICA = {"GIRUS", "GIRUS INDUSTRIA E COMERCIO DE MOVEIS E DECORACOES LTDA"}
+MARCAS_QUIMICA = {"ARTFIX"}
+# Todas as outras marcas = ATACADO
+
 cache = {"dados": None, "atualizado_em": None, "erro": None}
 BASE_URL = "https://app.omie.com.br/api/v1"
 HEADERS  = {"Content-Type": "application/json"}
@@ -55,11 +61,11 @@ def requer_auth(f):
     return decorated
 
 
-def classificar(nome):
-    n = (nome or "").upper()
-    if "GIRUS" in n or "INDUSMOV" in n:
+def classificar_marca(marca):
+    m = (marca or "").upper().strip()
+    if any(f in m for f in ["GIRUS"]):
         return "fabrica"
-    if "ARTFIX" in n:
+    if "ARTFIX" in m:
         return "quimica"
     return "atacado"
 
@@ -79,45 +85,102 @@ def omie_post(endpoint, call, params):
     return r.json()
 
 
-def buscar_faturamento_omie():
-    """Busca NFs de saída pelo módulo de Faturamento."""
-    mes = datetime.now().strftime("%m/%Y")
+def buscar_pedidos_omie():
+    """Busca pedidos de venda autorizados no mês atual agrupados por marca."""
+    mes = datetime.now()
+    data_de  = f"01/{mes.strftime('%m/%Y')}"
+    data_ate = f"30/{mes.strftime('%m/%Y')}"
+
     totais = {"fabrica": 0.0, "quimica": 0.0, "atacado": 0.0}
-    total_valor = 0.0
+    total_geral = 0.0
     pagina = 1
 
     while True:
-        resp = omie_post("produtos/nfconsultar", "ListarNF", {
-            "pagina": pagina,
-            "registros_por_pagina": 50,
-            "dDtEmi_De":  f"01/{mes}",
-            "dDtEmi_Ate": f"31/{mes}",
-            "tpNF": "1",  # 1 = Saída
-        })
-
-        registros = resp.get("nfCadastro", [])
-        if not registros:
+        try:
+            resp = omie_post("produtos/pedido", "ListarPedidos", {
+                "pagina": pagina,
+                "registros_por_pagina": 50,
+                "filtrar_por_data_de":  data_de,
+                "filtrar_por_data_ate": data_ate,
+                "etapa": "70",  # Faturado
+            })
+        except Exception:
             break
 
-        for nf in registros:
-            # Tenta diferentes campos de nome/cliente
-            nome = (
-                nf.get("dest", {}).get("cRazaoSocial", "") or
-                nf.get("ide", {}).get("cNome", "") or
-                nf.get("emit", {}).get("cRazaoSocial", "") or ""
-            )
-            valor = float(nf.get("total", {}).get("vNF", 0))
-            total_valor += valor
-            seg = classificar(nome)
-            totais[seg] += valor
+        pedidos = resp.get("pedido_venda_produto", [])
+        if not pedidos:
+            break
+
+        for pedido in pedidos:
+            cabecalho = pedido.get("cabecalho", {})
+            det = pedido.get("det", [])
+            for item in det:
+                produto = item.get("produto", {})
+                marca   = produto.get("marca", "") or ""
+                valor   = float(item.get("inf_adic", {}).get("valor_total", 0) or
+                                produto.get("valor_total", 0) or 0)
+                seg = classificar_marca(marca)
+                totais[seg] += valor
+                total_geral += valor
 
         total_pag = resp.get("total_de_paginas", 1)
-        print(f"  NF pág {pagina}/{total_pag}: {len(registros)} registros, total R$ {total_valor:,.0f}")
+        print(f"  Pedidos pág {pagina}/{total_pag}: total R$ {total_geral:,.0f}")
         if pagina >= total_pag:
             break
         pagina += 1
 
-    return totais, total_valor
+    return totais, total_geral
+
+
+def buscar_nf_omie():
+    """Busca NFs emitidas no mês atual agrupadas por marca do produto."""
+    mes = datetime.now()
+    data_de  = f"01/{mes.strftime('%m/%Y')}"
+    data_ate = f"30/{mes.strftime('%m/%Y')}"
+
+    totais = {"fabrica": 0.0, "quimica": 0.0, "atacado": 0.0}
+    total_geral = 0.0
+    pagina = 1
+
+    while True:
+        try:
+            resp = omie_post("produtos/nfconsultar", "ListarNF", {
+                "pagina": pagina,
+                "registros_por_pagina": 50,
+                "dDtEmi_De":  data_de,
+                "dDtEmi_Ate": data_ate,
+                "tpNF": "1",
+            })
+        except Exception:
+            break
+
+        nfs = resp.get("nfCadastro", [])
+        if not nfs:
+            break
+
+        for nf in nfs:
+            itens = nf.get("det", [])
+            if itens:
+                for item in itens:
+                    prod  = item.get("prod", {})
+                    marca = prod.get("cMarca", "") or ""
+                    valor = float(prod.get("vProd", 0) or 0)
+                    seg   = classificar_marca(marca)
+                    totais[seg] += valor
+                    total_geral += valor
+            else:
+                # Fallback: usa valor total da NF como atacado
+                valor = float(nf.get("total", {}).get("vNF", 0) or 0)
+                totais["atacado"] += valor
+                total_geral += valor
+
+        total_pag = resp.get("total_de_paginas", 1)
+        print(f"  NF pág {pagina}/{total_pag}: total R$ {total_geral:,.0f}")
+        if pagina >= total_pag:
+            break
+        pagina += 1
+
+    return totais, total_geral
 
 
 def montar_dados(fat, fonte="base", total_omie=0):
@@ -127,14 +190,13 @@ def montar_dados(fat, fonte="base", total_omie=0):
     prog_mes  = round((dia_atual / dias_mes) * 100, 1)
     fat_total = fat["fabrica"] + fat["quimica"] + fat["atacado"]
     mes       = hoje.strftime("%m/%Y")
-
     return {
-        "atualizado_em": datetime.now().isoformat(),
-        "mes":           mes,
-        "dia_atual":     dia_atual,
-        "dias_mes":      dias_mes,
-        "prog_mes":      prog_mes,
-        "fonte":         fonte,
+        "atualizado_em":  datetime.now().isoformat(),
+        "mes":            mes,
+        "dia_atual":      dia_atual,
+        "dias_mes":       dias_mes,
+        "prog_mes":       prog_mes,
+        "fonte":          fonte,
         "total_omie_raw": total_omie,
         "faturamento": {
             "fabrica": fat["fabrica"],
@@ -154,23 +216,33 @@ def montar_dados(fat, fonte="base", total_omie=0):
 
 def atualizar_cache():
     global cache
-    print(f"[{datetime.now():%H:%M:%S}] Buscando dados do Omie...")
+    print(f"[{datetime.now():%H:%M:%S}] Buscando dados do Omie (Click Forte)...")
 
     fat = dict(DADOS_BASE)
     fonte = "base"
     total_omie = 0
 
     if APP_KEY and APP_SECRET:
+        # Tenta NFs primeiro
         try:
-            totais, total_omie = buscar_faturamento_omie()
-            if total_omie > 0:
-                fat = totais
+            totais_nf, total_nf = buscar_nf_omie()
+            if total_nf > 0:
+                fat = totais_nf
+                total_omie = total_nf
                 fonte = "omie"
-                print(f"  ✓ Omie OK — Total: R$ {total_omie:,.2f}")
+                print(f"  ✓ NFs OK — Fábrica: R${fat['fabrica']:,.0f} | Química: R${fat['quimica']:,.0f} | Atacado: R${fat['atacado']:,.0f}")
             else:
-                print("  ! Omie retornou zero — usando dados base")
+                # Tenta pedidos como fallback
+                totais_ped, total_ped = buscar_pedidos_omie()
+                if total_ped > 0:
+                    fat = totais_ped
+                    total_omie = total_ped
+                    fonte = "omie-pedidos"
+                    print(f"  ✓ Pedidos OK — Total: R${total_ped:,.0f}")
+                else:
+                    print("  ! Zero registros — usando dados base")
         except Exception as e:
-            print(f"  ✗ Erro Omie: {e}")
+            print(f"  ✗ Erro: {e}")
 
     cache["dados"]         = montar_dados(fat, fonte, total_omie)
     cache["atualizado_em"] = datetime.now().isoformat()
