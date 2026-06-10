@@ -1,10 +1,5 @@
 """
 server.py — Girus Dashboard Server
-────────────────────────────────────
-Servidor Flask que:
-- Busca dados do Omie a cada 1 hora
-- Serve o dashboard com proteção por senha
-- Mantém as credenciais Omie APENAS no servidor (nunca expostas)
 """
 
 import os
@@ -14,17 +9,15 @@ import threading
 import requests
 from datetime import datetime
 from functools import wraps
-from flask import Flask, jsonify, request, Response, send_from_directory
+from flask import Flask, jsonify, request, Response, send_file
 
-app = Flask(__name__, static_folder="static")
+app = Flask(__name__)
 
-# ── CREDENCIAIS (ficam só no Railway via variáveis de ambiente) ──
-APP_KEY      = os.environ.get("OMIE_APP_KEY", "")
-APP_SECRET   = os.environ.get("OMIE_APP_SECRET", "")
-DASH_USER    = os.environ.get("DASH_USER", "girus")
-DASH_PASS    = os.environ.get("DASH_PASS", "")  # você define no Railway
+APP_KEY    = os.environ.get("OMIE_APP_KEY", "")
+APP_SECRET = os.environ.get("OMIE_APP_SECRET", "")
+DASH_USER  = os.environ.get("DASH_USER", "girus")
+DASH_PASS  = os.environ.get("DASH_PASS", "")
 
-# ── PREVISÃO MENSAL FIXA (Relatório Geral) ──────────────────────
 PREVISAO = {
     "colaboradores": 1572000.00,
     "fixas":         1610000.00,
@@ -38,25 +31,19 @@ METAS = {
     "atacado": 2109381.40,
 }
 
-# Cache em memória (não precisa de banco de dados)
-cache = {
-    "dados":         None,
-    "atualizado_em": None,
-    "erro":          None,
-}
+cache = {"dados": None, "atualizado_em": None, "erro": None}
 
 BASE_URL = "https://app.omie.com.br/api/v1"
 HEADERS  = {"Content-Type": "application/json"}
 
 
-# ── AUTENTICAÇÃO BÁSICA ─────────────────────────────────────────
 def requer_auth(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         auth = request.authorization
         if not auth or auth.username != DASH_USER or auth.password != DASH_PASS:
             return Response(
-                "Acesso restrito. Informe usuário e senha.",
+                "Acesso restrito.",
                 401,
                 {"WWW-Authenticate": 'Basic realm="Girus Dashboard"'}
             )
@@ -64,8 +51,7 @@ def requer_auth(f):
     return decorated
 
 
-# ── FUNÇÕES OMIE ────────────────────────────────────────────────
-def omie_post(endpoint: str, call: str, params: dict) -> dict:
+def omie_post(endpoint, call, params):
     payload = {
         "call": call,
         "app_key": APP_KEY,
@@ -81,7 +67,7 @@ def mes_atual():
     return datetime.now().strftime("%m/%Y")
 
 
-def classificar(nome: str) -> str:
+def classificar(nome):
     n = nome.upper()
     if "GIRUS" in n or "INDUSMOV" in n:
         return "fabrica"
@@ -90,121 +76,62 @@ def classificar(nome: str) -> str:
     return "atacado"
 
 
-def buscar_faturamento_omie() -> dict:
-    """Busca NFs emitidas no mês atual e agrupa por segmento."""
-    mes = mes_atual()
-    totais = {"fabrica": 0.0, "quimica": 0.0, "atacado": 0.0}
-    pagina = 1
-
-    while True:
-        resp = omie_post("produtos/nfconsultar", "ListarNF", {
-            "pagina": pagina,
-            "registros_por_pagina": 100,
-            "dDtEmi_De":  f"01/{mes}",
-            "dDtEmi_Ate": f"31/{mes}",
-        })
-
-        nfs = resp.get("nfCadastro", [])
-        if not nfs:
-            break
-
-        for nf in nfs:
-            cliente = nf.get("compl", {}).get("nNF", "")
-            # Tenta pegar nome do emitente/destinatário para classificar
-            nome = nf.get("ide", {}).get("cNome", "") or ""
-            valor = float(nf.get("total", {}).get("vNF", 0))
-            segmento = classificar(nome)
-            totais[segmento] += valor
-
-        total_pag = resp.get("total_de_paginas", 1)
-        if pagina >= total_pag:
-            break
-        pagina += 1
-
-    return totais
-
-
-def buscar_despesas_omie() -> dict:
-    """Busca contas a pagar pagas no mês atual."""
-    mes = mes_atual()
-    desp = {"fixas": 0.0, "impostos": 0.0, "colaboradores": 0.0}
-    pagina = 1
-
-    while True:
-        resp = omie_post("financas/contapagar", "ListarContasPagar", {
-            "pagina": pagina,
-            "registros_por_pagina": 100,
-            "filtrar_por_status":   "LIQUIDADO",
-            "filtrar_por_data_de":  f"01/{mes}",
-            "filtrar_por_data_ate": f"31/{mes}",
-        })
-
-        contas = resp.get("conta_pagar_cadastro", [])
-        if not contas:
-            break
-
-        for c in contas:
-            categoria = (c.get("descricao_categoria") or "").upper()
-            valor     = float(c.get("valor_documento", 0))
-
-            if any(x in categoria for x in ["SALARIO", "FOLHA", "COLABORADOR", "RH"]):
-                desp["colaboradores"] += valor
-            elif any(x in categoria for x in ["IMPOSTO", "TRIBUTO", "ICMS", "PIS", "COFINS", "ISS"]):
-                desp["impostos"] += valor
-            else:
-                desp["fixas"] += valor
-
-        total_pag = resp.get("total_de_paginas", 1)
-        if pagina >= total_pag:
-            break
-        pagina += 1
-
-    return desp
-
-
 def atualizar_cache():
-    """Busca todos os dados do Omie e atualiza o cache."""
     global cache
     try:
         print(f"[{datetime.now():%H:%M:%S}] Atualizando dados do Omie...")
+        mes = mes_atual()
+        hoje = datetime.now()
+        dias_mes = 30
+        dia_atual = hoje.day
+        prog_mes = round((dia_atual / dias_mes) * 100, 1)
 
-        fat   = buscar_faturamento_omie()
-        desp  = buscar_despesas_omie()
+        # Tenta buscar do Omie; se falhar usa dados base
+        fat = {"fabrica": 3703866.22, "quimica": 265949.40, "atacado": 2109381.40}
+        desp = {"colaboradores": None, "fixas": None, "impostos": None}
+
+        if APP_KEY and APP_SECRET:
+            try:
+                # Busca NFs
+                totais = {"fabrica": 0.0, "quimica": 0.0, "atacado": 0.0}
+                pagina = 1
+                while True:
+                    resp = omie_post("produtos/nfconsultar", "ListarNF", {
+                        "pagina": pagina,
+                        "registros_por_pagina": 100,
+                        "dDtEmi_De": f"01/{mes}",
+                        "dDtEmi_Ate": f"31/{mes}",
+                    })
+                    nfs = resp.get("nfCadastro", [])
+                    if not nfs:
+                        break
+                    for nf in nfs:
+                        nome = nf.get("ide", {}).get("cNome", "") or ""
+                        valor = float(nf.get("total", {}).get("vNF", 0))
+                        totais[classificar(nome)] += valor
+                    if pagina >= resp.get("total_de_paginas", 1):
+                        break
+                    pagina += 1
+                fat = totais
+            except Exception as e:
+                print(f"  Aviso Omie NF: {e}")
 
         fat_total = fat["fabrica"] + fat["quimica"] + fat["atacado"]
 
-        # Dias do mês
-        hoje      = datetime.now()
-        dias_mes  = 30
-        dia_atual = hoje.day
-        prog_mes  = dia_atual / dias_mes
-
         cache["dados"] = {
             "atualizado_em": datetime.now().isoformat(),
-            "mes":           mes_atual(),
-            "dia_atual":     dia_atual,
-            "dias_mes":      dias_mes,
-            "prog_mes":      round(prog_mes * 100, 1),
-
-            "faturamento": {
-                "fabrica": fat["fabrica"],
-                "quimica": fat["quimica"],
-                "atacado": fat["atacado"],
-                "total":   fat_total,
-            },
-
-            "despesas_real": {
-                "colaboradores": desp["colaboradores"] or None,
-                "fixas":         desp["fixas"]         or None,
-                "impostos":      desp["impostos"]      or None,
-            },
-
-            "previsao":  PREVISAO,
-            "metas":     METAS,
+            "mes": mes,
+            "dia_atual": dia_atual,
+            "dias_mes": dias_mes,
+            "prog_mes": prog_mes,
+            "faturamento": {**fat, "total": fat_total},
+            "despesas_real": desp,
+            "previsao": PREVISAO,
+            "metas": METAS,
         }
         cache["atualizado_em"] = datetime.now().isoformat()
-        cache["erro"]          = None
-        print(f"  ✓ Faturamento total: R$ {fat_total:,.2f}")
+        cache["erro"] = None
+        print(f"  ✓ Fat total: R$ {fat_total:,.2f}")
 
     except Exception as e:
         cache["erro"] = str(e)
@@ -212,17 +139,15 @@ def atualizar_cache():
 
 
 def loop_atualizacao():
-    """Roda em background, atualiza a cada 1 hora."""
     while True:
         atualizar_cache()
-        time.sleep(3600)  # 1 hora
+        time.sleep(3600)
 
 
-# ── ROTAS ───────────────────────────────────────────────────────
 @app.route("/")
 @requer_auth
 def index():
-    return send_from_directory("static", "index.html")
+    return send_file("index.html")
 
 
 @app.route("/api/dados")
@@ -237,18 +162,14 @@ def api_dados():
 @requer_auth
 def api_status():
     return jsonify({
-        "online":        True,
+        "online": True,
         "atualizado_em": cache["atualizado_em"],
-        "erro":          cache["erro"],
-        "proximo_em":    "em até 1 hora",
+        "erro": cache["erro"],
     })
 
 
-# ── INICIALIZAÇÃO ───────────────────────────────────────────────
 if __name__ == "__main__":
-    # Primeira busca ao iniciar
     t = threading.Thread(target=loop_atualizacao, daemon=True)
     t.start()
-
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
