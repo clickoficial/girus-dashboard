@@ -16,6 +16,14 @@ Mudancas v3:
 """
 
 import os
+import sys
+
+# Logs sem buffer (gunicorn/Railway)
+try:
+    sys.stdout.reconfigure(line_buffering=True)
+    sys.stderr.reconfigure(line_buffering=True)
+except Exception:
+    pass
 import time
 import calendar
 import threading
@@ -355,8 +363,22 @@ def api_status():
     })
 
 
+# Inicia a rotina de atualizacao no import do modulo.
+# Necessario porque o Railway roda o app via gunicorn, que NUNCA executa
+# o bloco __main__ — sem isso a busca no Omie nunca acontece.
+_loop_iniciado = False
+
+
+def iniciar_loop():
+    global _loop_iniciado
+    if not _loop_iniciado:
+        _loop_iniciado = True
+        threading.Thread(target=loop_atualizacao, daemon=True).start()
+
+
+iniciar_loop()
+
+
 if __name__ == "__main__":
-    t = threading.Thread(target=loop_atualizacao, daemon=True)
-    t.start()
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
