@@ -115,15 +115,15 @@
 
   <div class="strip">
     <b>Período ativo: <span id="s-mes"></span>.</b>
-    Faturamento = pedidos de venda autorizados (Omie, ao vivo).
-    Custos: folha +5% a.m. · fixas congeladas · <b>imposto = 10% do faturamento real</b>.
+    Carteira do mês = pedidos de venda autorizados no Omie (inclui lançados com data futura — não é o faturado/emitido).
+    Custos: folha +5% a.m. · fixas congeladas · <b>imposto = 10% da carteira</b>.
     Referência atual: <b>Dia <span id="s-dia"></span> de <span id="s-dias"></span> (<span id="s-prog"></span>% do mês)</b>.
   </div>
 
   <div class="cards">
     <div class="card f">
       <div class="tagseg">FÁBRICA</div><h2>Girus Móveis</h2>
-      <div class="lbl">FATURAMENTO REAL</div>
+      <div class="lbl">CARTEIRA DO MÊS</div>
       <div class="big"><small>R$</small><span id="f-val">—</span></div>
       <div class="metaline">Meta: <span id="f-meta"></span> · <b id="f-pct"></b></div>
       <div class="barwrap"><div class="barlbl"><span>0%</span><span id="f-pctlbl"></span><span>100%</span></div>
@@ -136,7 +136,7 @@
     </div>
     <div class="card q">
       <div class="tagseg">QUÍMICA</div><h2>Artfix</h2>
-      <div class="lbl">FATURAMENTO REAL</div>
+      <div class="lbl">CARTEIRA DO MÊS</div>
       <div class="big"><small>R$</small><span id="q-val">—</span></div>
       <div class="metaline">Meta: <span id="q-meta"></span> · <b id="q-pct"></b></div>
       <div class="barwrap"><div class="barlbl"><span>0%</span><span id="q-pctlbl"></span><span>100%</span></div>
@@ -149,7 +149,7 @@
     </div>
     <div class="card a">
       <div class="tagseg">ATACADO</div><h2>Demais Fornecedores</h2>
-      <div class="lbl">FATURAMENTO REAL</div>
+      <div class="lbl">CARTEIRA DO MÊS</div>
       <div class="big"><small>R$</small><span id="a-val">—</span></div>
       <div class="metaline">Meta: <span id="a-meta"></span> · <b id="a-pct"></b></div>
       <div class="barwrap"><div class="barlbl"><span>0%</span><span id="a-pctlbl"></span><span>100%</span></div>
@@ -170,14 +170,14 @@
         <tr><td>Folha (Colaboradores)</td><td id="t-col-p"></td><td id="t-col-r"></td><td id="t-col-j"></td><td><span class="tag prev">Previsto</span></td></tr>
         <tr><td>Despesas Fixas</td><td id="t-fix-p"></td><td>—</td><td id="t-fix-j"></td><td><span class="tag wait">Aguardando</span></td></tr>
         <tr><td>Imposto (10% do faturamento)</td><td id="t-imp-p"></td><td id="t-imp-r"></td><td id="t-imp-j"></td><td><span class="tag ok">Automático</span></td></tr>
-        <tr><td>Faturamento Total</td><td id="t-fat-p"></td><td id="t-fat-r" style="color:var(--blue)"></td><td id="t-fat-j"></td><td><span class="tag" id="t-fat-tag"></span></td></tr>
+        <tr><td>Carteira Total</td><td id="t-fat-p"></td><td id="t-fat-r" style="color:var(--blue)"></td><td id="t-fat-j"></td><td><span class="tag" id="t-fat-tag"></span></td></tr>
         <tr class="total"><td>Total Custos</td><td id="t-cst-p"></td><td id="t-cst-r"></td><td id="t-cst-j"></td><td></td></tr>
       </table>
-      <div class="note">📌 A linha amarela nas barras marca o ponto esperado para hoje no mês. Faturamento acima da linha = à frente da meta. O imposto é recalculado automaticamente como 10% do faturamento real do Omie; folha e fixas são previsões.</div>
+      <div class="note">⚠️ Este painel mostra a CARTEIRA do mês (todos os pedidos autorizados no Omie, inclusive com data futura), e fica ~10-15% acima do faturado/emitido do Relatório Andy. A linha amarela marca o ponto esperado para hoje. Imposto = 10% da carteira; folha e fixas são previsões.</div>
     </div>
 
     <div class="panel">
-      <div class="ptitle">FATURAMENTO ACUMULADO</div>
+      <div class="ptitle">CARTEIRA ACUMULADA NO MÊS</div>
       <div class="accbig"><small>R$ </small><span id="r-acc"></span></div>
       <div class="accsub">Fonte: <span id="r-fonte"></span> · <span id="r-mes"></span></div>
       <div class="kv"><span>Folha (prev.)</span><span id="r-col"></span></div>
@@ -208,7 +208,7 @@
   </div>
 
   <footer>
-    <span>Click Forte · Faturamento: pedidos de venda Omie ao vivo · Imposto 10% dinâmico</span>
+    <span>Click Forte · Carteira: pedidos de venda Omie ao vivo (inclui data futura) · Imposto 10% dinâmico</span>
     <span>Fábrica (GIRUS) · Química (ARTFIX) · Atacado (Fornecedores)</span>
   </footer>
 </div>
