@@ -404,7 +404,10 @@ def loop_atualizacao():
             print("Erro loop: %s" % e)
             if cache["dados"] is None:
                 cache["dados"] = montar_dados(dict(DADOS_FALLBACK))
-        time.sleep(3600)
+        # Pedidos a cada 20 min (painel ao vivo na sala).
+        # O catalogo de produtos continua em cache de 24h (MAPA_MARCAS_VALIDADE),
+        # entao so as 10 paginas de pedidos sao rebuscadas neste intervalo.
+        time.sleep(1200)
 
 
 @app.route("/")
