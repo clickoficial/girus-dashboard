@@ -145,17 +145,79 @@ def omie_post(endpoint, call, params):
     }
     r = requests.post(
         "%s/%s/" % (BASE_URL, endpoint),
-        headers=HEADERS, json=payload, timeout=30
+        headers=HEADERS, json=payload, timeout=60
     )
     r.raise_for_status()
     return r.json()
 
 
+def omie_post_retry(endpoint, call, params, tentativas=3):
+    ultima = None
+    for i in range(tentativas):
+        try:
+            return omie_post(endpoint, call, params)
+        except Exception as e:
+            ultima = e
+            print("  tentativa %s/%s falhou (%s): %s"
+                  % (i + 1, tentativas, call, e))
+            time.sleep(3)
+    raise ultima
+
+
+MAPA_MARCAS = {}
+MAPA_MARCAS_TS = 0.0
+MAPA_MARCAS_VALIDADE = 24 * 3600  # recarrega o catalogo 1x por dia
+
+
+def carregar_mapa_marcas():
+    """
+    Busca o cadastro de produtos do Omie e monta codigo_produto -> marca.
+    Necessario porque ListarPedidos NAO devolve a marca do item.
+    """
+    global MAPA_MARCAS, MAPA_MARCAS_TS
+    if MAPA_MARCAS and (time.time() - MAPA_MARCAS_TS) < MAPA_MARCAS_VALIDADE:
+        return MAPA_MARCAS
+
+    mapa = {}
+    pagina = 1
+    while True:
+        resp = omie_post_retry("geral/produtos", "ListarProdutos", {
+            "pagina": pagina,
+            "registros_por_pagina": 500,
+            "apenas_importado_api": "N",
+            "filtrar_apenas_omiepdv": "N",
+        })
+        produtos = resp.get("produto_servico_cadastro", []) or []
+        for p in produtos:
+            marca = (p.get("marca") or "").strip()
+            cod_int = p.get("codigo_produto")
+            cod_str = p.get("codigo")
+            if cod_int is not None:
+                mapa[str(cod_int)] = marca
+            if cod_str:
+                mapa[str(cod_str)] = marca
+        total_pag = int(resp.get("total_de_paginas", 1) or 1)
+        print("  Catalogo pag %s/%s — %s produtos mapeados"
+              % (pagina, total_pag, len(mapa)))
+        if pagina >= total_pag:
+            break
+        pagina += 1
+
+    if not mapa:
+        raise RuntimeError("catalogo de produtos vazio — sem como classificar")
+    MAPA_MARCAS = mapa
+    MAPA_MARCAS_TS = time.time()
+    return mapa
+
+
 def buscar_faturamento_por_marca():
     """
-    Busca pedidos de venda do mes vigente no Omie e agrupa por marca
-    (GIRUS / ARTFIX / demais). Ignora pedidos cancelados.
+    Soma os pedidos de venda do mes vigente (Omie), classificando cada item
+    pela marca do produto (catalogo). Tudo-ou-nada: se qualquer pagina
+    falhar apos as tentativas, levanta excecao e NADA parcial e publicado.
     """
+    mapa = carregar_mapa_marcas()
+
     hoje = agora()
     ultimo_dia = calendar.monthrange(hoje.year, hoje.month)[1]
     data_de = "01/" + hoje.strftime("%m/%Y")
@@ -164,20 +226,17 @@ def buscar_faturamento_por_marca():
     totais = {"fabrica": 0.0, "quimica": 0.0, "atacado": 0.0}
     total_geral = 0.0
     cancelados = 0
+    sem_marca = 0
     pagina = 1
 
     while True:
-        try:
-            resp = omie_post("produtos/pedido", "ListarPedidos", {
-                "pagina": pagina,
-                "registros_por_pagina": 200,
-                "filtrar_por_data_de": data_de,
-                "filtrar_por_data_ate": data_ate,
-                "apenas_importado_api": "N",
-            })
-        except Exception as e:
-            print("  Erro pedidos pag %s: %s" % (pagina, e))
-            break
+        resp = omie_post_retry("produtos/pedido", "ListarPedidos", {
+            "pagina": pagina,
+            "registros_por_pagina": 100,
+            "filtrar_por_data_de": data_de,
+            "filtrar_por_data_ate": data_ate,
+            "apenas_importado_api": "N",
+        })
 
         pedidos = resp.get("pedido_venda_produto", []) or []
         if not pedidos:
@@ -190,7 +249,6 @@ def buscar_faturamento_por_marca():
                 continue
             for item in (pedido.get("det", []) or []):
                 prod = item.get("produto", {}) or {}
-                marca = prod.get("marca", "") or ""
                 valor = prod.get("valor_mercadoria")
                 if valor in (None, "", 0, "0"):
                     try:
@@ -202,13 +260,21 @@ def buscar_faturamento_por_marca():
                     valor = float(valor or 0)
                 except (TypeError, ValueError):
                     valor = 0.0
+
+                marca = mapa.get(str(prod.get("codigo_produto") or ""), None)
+                if marca is None:
+                    marca = mapa.get(str(prod.get("codigo") or ""), None)
+                if marca is None:
+                    sem_marca += 1
+                    marca = ""
                 seg = classificar_marca(marca)
                 totais[seg] += valor
                 total_geral += valor
 
         total_pag = int(resp.get("total_de_paginas", 1) or 1)
-        print("  Pedidos pag %s/%s — R$ %s | cancelados ignorados: %s"
-              % (pagina, total_pag, format(total_geral, ",.0f"), cancelados))
+        print("  Pedidos pag %s/%s — R$ %s | cancelados: %s | itens sem marca: %s"
+              % (pagina, total_pag, format(total_geral, ",.0f"),
+                 cancelados, sem_marca))
         if pagina >= total_pag:
             break
         pagina += 1
@@ -317,6 +383,10 @@ def atualizar_cache():
             else:
                 print("  ! API retornou zero — usando ultimo valor conhecido")
         except Exception as e:
+            if cache["dados"] is not None:
+                cache["erro"] = str(e)
+                print("  Erro API: %s — mantendo dado anterior em cache" % e)
+                return
             print("  Erro API: %s — usando ultimo valor conhecido" % e)
 
     cache["dados"] = montar_dados(fat, fonte)
