@@ -301,10 +301,15 @@ def buscar_faturamento_por_marca():
                     fora_periodo += 1
                     continue
 
-            # So conta pedidos FATURADOS (etapa 70 = "Autorizado" no Omie).
-            # As etapas 10 (digitacao), 50 (aguardando faturamento) e
-            # 60 (separacao) ainda nao foram faturadas, entao ficam de fora.
-            # Isso faz o painel bater com o Relatorio Andy (filtro Autorizado).
+            # Conta apenas pedidos FATURADOS (etapa 70). Confirmado contra a
+            # tela "Vendas e NF-e" do Omie: "Total faturado no mes" = etapa 70,
+            # e e exatamente o que o Relatorio Andy (Situacao: Autorizado)
+            # reporta. As etapas 10 (digitacao), 50 (aguardando faturamento) e
+            # 60 (em separacao) sao mostradas em categorias separadas no Omie
+            # ("Faturar hoje", "Pendentes") e NAO entram no total faturado.
+            # NOTA: o painel e o Andy sao lidos em momentos diferentes; ao longo
+            # do dia pedidos em 50/60 vao faturando e migram para 70, entao o
+            # numero sobe durante o dia. Diferenca de poucos % = timing, nao bug.
             if etapa_pedido(pedido, info) != "70":
                 nao_autorizado += 1
                 continue
