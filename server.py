@@ -268,8 +268,6 @@ def buscar_faturamento_por_marca():
     sem_marca = 0
     fora_periodo = 0
     nao_autorizado = 0
-    etapas_contagem = {}   # diagnostico: quantos pedidos por etapa
-    etapas_valor = {}      # diagnostico: valor por etapa
     pagina = 1
 
     while True:
@@ -303,21 +301,13 @@ def buscar_faturamento_por_marca():
                     fora_periodo += 1
                     continue
 
-            # DIAGNOSTICO: contabiliza valor por etapa, para compararmos
-            # com o Andy (que filtra so 'Autorizado'). Assim vemos quanto
-            # valor esta em cada etapa antes de decidir o corte.
-            et = etapa_pedido(pedido, info)
-            val_ped = 0.0
-            for it in (pedido.get("det", []) or []):
-                p = it.get("produto", {}) or {}
-                v = p.get("valor_mercadoria")
-                try:
-                    v = float(v or 0)
-                except (TypeError, ValueError):
-                    v = 0.0
-                val_ped += v
-            etapas_contagem[et] = etapas_contagem.get(et, 0) + 1
-            etapas_valor[et] = etapas_valor.get(et, 0.0) + val_ped
+            # So conta pedidos FATURADOS (etapa 70 = "Autorizado" no Omie).
+            # As etapas 10 (digitacao), 50 (aguardando faturamento) e
+            # 60 (separacao) ainda nao foram faturadas, entao ficam de fora.
+            # Isso faz o painel bater com o Relatorio Andy (filtro Autorizado).
+            if etapa_pedido(pedido, info) != "70":
+                nao_autorizado += 1
+                continue
             for item in (pedido.get("det", []) or []):
                 prod = item.get("produto", {}) or {}
                 valor = prod.get("valor_mercadoria")
@@ -343,17 +333,10 @@ def buscar_faturamento_por_marca():
                 total_geral += valor
 
         total_pag = int(resp.get("total_de_paginas", 1) or 1)
-        print("  Pedidos pag %s/%s — R$ %s | cancelados: %s | fora periodo: %s | itens sem marca: %s"
+        print("  Pedidos pag %s/%s — R$ %s | cancelados: %s | fora periodo: %s | nao faturado: %s | itens sem marca: %s"
               % (pagina, total_pag, format(total_geral, ",.0f"),
-                 cancelados, fora_periodo, sem_marca))
+                 cancelados, fora_periodo, nao_autorizado, sem_marca))
         if pagina >= total_pag:
-            # DIAGNOSTICO final: mostra valor acumulado por etapa.
-            print("  --- DISTRIBUICAO POR ETAPA (diagnostico) ---")
-            for et in sorted(etapas_valor.keys()):
-                print("    etapa '%s': %s pedidos | R$ %s"
-                      % (et, etapas_contagem.get(et, 0),
-                         format(etapas_valor[et], ",.0f")))
-            print("  --------------------------------------------")
             break
         pagina += 1
 
