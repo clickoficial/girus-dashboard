@@ -246,7 +246,7 @@ def data_emissao_pedido(info):
     return None
 
 
-def buscar_faturamento_por_marca():
+def buscar_faturamento_por_marca(alvo=None):
     """
     Soma os pedidos de venda do mes vigente (Omie), classificando cada item
     pela marca do produto (catalogo). Tudo-ou-nada: se qualquer pagina
@@ -255,12 +255,26 @@ def buscar_faturamento_por_marca():
     mapa = carregar_mapa_marcas()
 
     hoje = agora()
-    # Janela: do dia 01 ate HOJE (nao ate o fim do mes).
-    # Isso, somado ao filtro por data de emissao abaixo, faz o painel
-    # bater com o Relatorio Andy (faturado ate hoje, nao carteira futura).
-    data_de = "01/" + hoje.strftime("%m/%Y")
-    data_ate = hoje.strftime("%d/%m/%Y")
-    primeiro_dia = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    # alvo=None -> mes vigente (01 ate HOJE). alvo=(ano,mes) -> mes historico
+    # completo (01 ate ultimo dia daquele mes), para conferencia de fechamento.
+    if alvo is None:
+        # Janela: do dia 01 ate HOJE (nao ate o fim do mes).
+        # Isso, somado ao filtro por data de emissao abaixo, faz o painel
+        # bater com o Relatorio Andy (faturado ate hoje, nao carteira futura).
+        ano_a, mes_a = hoje.year, hoje.month
+        primeiro_dia = hoje.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        ultimo_dia = hoje.replace(hour=23, minute=59, second=59, microsecond=0)
+        data_de = "01/%02d/%04d" % (mes_a, ano_a)
+        data_ate = hoje.strftime("%d/%m/%Y")
+    else:
+        ano_a, mes_a = alvo
+        ult = calendar.monthrange(ano_a, mes_a)[1]
+        base = hoje.replace(year=ano_a, month=mes_a, day=1, hour=0, minute=0,
+                            second=0, microsecond=0)
+        primeiro_dia = base
+        ultimo_dia = base.replace(day=ult, hour=23, minute=59, second=59)
+        data_de = "01/%02d/%04d" % (mes_a, ano_a)
+        data_ate = "%02d/%02d/%04d" % (ult, mes_a, ano_a)
 
     totais = {"fabrica": 0.0, "quimica": 0.0, "atacado": 0.0}
     total_geral = 0.0
@@ -295,9 +309,8 @@ def buscar_faturamento_por_marca():
             if dt_emis is not None:
                 d = dt_emis.replace(hour=0, minute=0, second=0, microsecond=0)
                 limite = primeiro_dia.replace(tzinfo=None)
-                hoje_sem_tz = hoje.replace(tzinfo=None, hour=23, minute=59,
-                                           second=59, microsecond=0)
-                if d < limite or d > hoje_sem_tz:
+                limite_fim = ultimo_dia.replace(tzinfo=None)
+                if d < limite or d > limite_fim:
                     fora_periodo += 1
                     continue
 
@@ -348,17 +361,28 @@ def buscar_faturamento_por_marca():
     return totais, total_geral
 
 
-def montar_dados(fat, fonte="manual"):
+def montar_dados(fat, fonte="manual", alvo=None):
     hoje = agora()
-    dias_mes = calendar.monthrange(hoje.year, hoje.month)[1]
-    dia = hoje.day
+    if alvo is not None:
+        ano_a, mes_a = alvo
+        dias_mes = calendar.monthrange(ano_a, mes_a)[1]
+        # Mes historico: consideramos o mes inteiro (fechado), dia = ultimo.
+        if (ano_a, mes_a) == (hoje.year, hoje.month):
+            dia = hoje.day
+        else:
+            dia = dias_mes
+        ref = hoje.replace(year=ano_a, month=mes_a, day=min(dia, dias_mes))
+    else:
+        dias_mes = calendar.monthrange(hoje.year, hoje.month)[1]
+        dia = hoje.day
+        ref = hoje
     prog = round(dia / dias_mes * 100.0, 1)
 
     fat = {k: float(fat.get(k, 0) or 0) for k in ("fabrica", "quimica", "atacado")}
     fat_total = fat["fabrica"] + fat["quimica"] + fat["atacado"]
 
-    metas = metas_do_mes(hoje)
-    folha = folha_do_mes(hoje)
+    metas = metas_do_mes(ref)
+    folha = folha_do_mes(ref)
     imposto_prev = round(metas["total"] * ALIQUOTA_IMPOSTO, 2)
     custos_prev = round(folha + FIXAS_MENSAIS + imposto_prev, 2)
 
@@ -389,7 +413,7 @@ def montar_dados(fat, fonte="manual"):
             "mes": "%s/%s" % (mes_n, ano),
             "total": RAMPA[chave]["total"],
             "quimica": RAMPA[chave]["quimica"],
-            "atual": (int(ano) == hoje.year and int(mes_n) == hoje.month),
+            "atual": (int(ano) == ref.year and int(mes_n) == ref.month),
         })
 
     fat_saida = dict(fat)
@@ -399,7 +423,7 @@ def montar_dados(fat, fonte="manual"):
 
     return {
         "atualizado_em": agora().isoformat(),
-        "mes": hoje.strftime("%m/%Y"),
+        "mes": ref.strftime("%m/%Y"),
         "dia_atual": dia,
         "dias_mes": dias_mes,
         "prog_mes": prog,
@@ -439,16 +463,21 @@ def atualizar_cache():
     if APP_KEY and APP_SECRET:
         try:
             totais, total = buscar_faturamento_por_marca()
-            if total > 0:
-                fat = totais
-                fonte = "omie"
-                print("  OK — Fabrica: R$%s | Quimica: R$%s | Atacado: R$%s"
-                      % (format(fat["fabrica"], ",.0f"),
-                         format(fat["quimica"], ",.0f"),
-                         format(fat["atacado"], ",.0f")))
-            else:
-                print("  ! API retornou zero — usando ultimo valor conhecido")
+            # A leitura teve SUCESSO (nao levantou excecao). Portanto o valor
+            # e real, mesmo que seja R$ 0 — isso acontece normalmente no inicio
+            # do mes, quando ainda nao houve faturamento (etapa 70). Antes o
+            # codigo tratava total==0 como falha e mostrava o fallback do mes
+            # anterior, o que colocava um numero ERRADO na TV. Agora R$ 0 real
+            # e publicado como tal, com fonte "omie".
+            fat = totais
+            fonte = "omie"
+            print("  OK — Fabrica: R$%s | Quimica: R$%s | Atacado: R$%s (total R$%s)"
+                  % (format(fat["fabrica"], ",.0f"),
+                     format(fat["quimica"], ",.0f"),
+                     format(fat["atacado"], ",.0f"),
+                     format(total, ",.0f")))
         except Exception as e:
+            # Só aqui (falha real de leitura) usamos o ultimo valor conhecido.
             if cache["dados"] is not None:
                 cache["erro"] = str(e)
                 print("  Erro API: %s — mantendo dado anterior em cache" % e)
@@ -485,6 +514,38 @@ def index():
 @app.route("/api/dados")
 @requer_auth
 def api_dados():
+    # Consulta de mes historico sob demanda: /api/dados?mes=2026-06
+    # Le o Omie na hora (sem cache), para o mes completo pedido. Nao toca
+    # no cache do mes vigente. Se falhar, devolve erro para o front tratar.
+    mes_param = (request.args.get("mes") or "").strip()
+    hoje = agora()
+    if mes_param:
+        try:
+            ano_a, mes_a = mes_param.split("-")
+            alvo = (int(ano_a), int(mes_a))
+        except (ValueError, AttributeError):
+            return jsonify({"status": "erro",
+                            "mensagem": "Formato de mes invalido. Use AAAA-MM."}), 400
+        # Se pediram o mes vigente, devolve o cache normal (ja e ao vivo).
+        if alvo == (hoje.year, hoje.month) and cache["dados"] is not None:
+            return jsonify({"status": "ok", "dados": cache["dados"]})
+        # Mes passado (ou futuro): le sob demanda.
+        fat = dict(DADOS_FALLBACK)
+        fonte = "omie-historico"
+        if APP_KEY and APP_SECRET:
+            try:
+                totais, total = buscar_faturamento_por_marca(alvo=alvo)
+                if total > 0:
+                    fat = totais
+                    fonte = "omie"
+                else:
+                    fonte = "sem-dados"
+            except Exception as e:
+                return jsonify({"status": "erro",
+                                "mensagem": "Falha ao ler Omie: %s" % e}), 502
+        return jsonify({"status": "ok",
+                        "dados": montar_dados(fat, fonte, alvo=alvo)})
+
     if cache["dados"] is None:
         return jsonify({"status": "ok",
                         "dados": montar_dados(dict(DADOS_FALLBACK))})
@@ -499,6 +560,41 @@ def api_status():
         "atualizado_em": cache["atualizado_em"],
         "erro": cache["erro"],
         "fonte": cache["dados"]["fonte"] if cache["dados"] else "manual",
+    })
+
+
+# Releitura manual sob demanda. Util quando o painel caiu para o valor
+# manual (API offline) e nao se quer esperar o ciclo de 20 min nem
+# reiniciar o servico. Acesse: /api/atualizar
+# Guarda anti-martelo: bloqueia chamadas com menos de 30s de intervalo,
+# para nao estourar o rate-limit do Omie se o endpoint for chamado em
+# sequencia.
+_ultimo_refresh_manual = {"ts": 0.0}
+
+
+@app.route("/api/atualizar")
+@requer_auth
+def api_atualizar():
+    agora_ts = time.time()
+    desde = agora_ts - _ultimo_refresh_manual["ts"]
+    if desde < 30:
+        return jsonify({
+            "status": "aguarde",
+            "mensagem": "Releitura recente; aguarde %ss." % int(30 - desde),
+            "atualizado_em": cache["atualizado_em"],
+            "fonte": cache["dados"]["fonte"] if cache["dados"] else "manual",
+        })
+    _ultimo_refresh_manual["ts"] = agora_ts
+    try:
+        atualizar_cache()
+    except Exception as e:
+        return jsonify({"status": "erro", "mensagem": str(e),
+                        "atualizado_em": cache["atualizado_em"]})
+    return jsonify({
+        "status": "ok",
+        "atualizado_em": cache["atualizado_em"],
+        "fonte": cache["dados"]["fonte"] if cache["dados"] else "manual",
+        "faturamento": cache["dados"]["faturamento"] if cache["dados"] else None,
     })
 
 
